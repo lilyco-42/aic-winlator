@@ -177,6 +177,19 @@ public class Win32AppWorkarounds implements OnPreExecListener {
                 return (WindowWorkaround) (window) -> AppUtils.runDelayed(() -> winHandler.bringToFront(window.getClassName(), window.getHandle()), 1000);
             case "launcher.exe":
                 return (PreExecWorkaround) (path) -> runGameExecutable(null, path);
+            // Alice in Cradle（Unity + D3D11）
+            //
+            // Winlator 自己的 README 写得很清楚：
+            //   "To improve stability in games that uses Unity Engine, try changing the
+            //    Box64 preset to Stability or in the shortcut settings add the exec
+            //    argument -force-gfx-direct."
+            //
+            // 预设那半句由 Container.box64Preset 的默认值处理（见 Container.java）。
+            // 这里补上 exec 参数那半句 —— AIC 走的是「直接 exec_path 启动」的路径，
+            // 拿不到 shortcut 的 execArgs，所以只能从 EXTRA_EXEC_ARGS 注进去
+            // （XServerDisplayActivity.getWineStartCommand 会消费掉它）。
+            case "aliceincradle.exe":
+                return (EnvVarsWorkaround) (envVars) -> envVars.put("EXTRA_EXEC_ARGS", "-force-gfx-direct");
             case "steam.exe":
                 return (PreExecWorkaround) (path) -> {
                     if (activity.getPreferences().getBoolean("save_mem_on_run_from_steam", true)) {

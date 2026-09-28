@@ -17,7 +17,14 @@ import java.io.File;
 import java.util.Iterator;
 
 public class Container {
-    public static final String DEFAULT_ENV_VARS = "ZINK_DESCRIPTORS=lazy ZINK_DEBUG=compact MESA_SHADER_CACHE_DISABLE=false MESA_SHADER_CACHE_MAX_SIZE=512MB mesa_glthread=true WINEESYNC=1 TU_DEBUG=noconform";
+    // 默认环境变量：上游原样 + BOX64_UNITYPLAYER=1
+    //
+    // 为什么加 BOX64_UNITYPLAYER=1：
+    //   box64 上游文档（ptitSeb/box64 docs/USAGE.md）说这个变量默认就是 1，
+    //   作用是「检测到 UnityPlayer 时套用保守设置」。但社区教程普遍反映
+    //   Winlator 的「性能/快速」预设会把 Unity 游戏跑挂（跑一会儿红感叹号），
+    //   所以这里显式写上，防止被其它预设的变量覆盖掉。
+    public static final String DEFAULT_ENV_VARS = "ZINK_DESCRIPTORS=lazy ZINK_DEBUG=compact MESA_SHADER_CACHE_DISABLE=false MESA_SHADER_CACHE_MAX_SIZE=512MB mesa_glthread=true WINEESYNC=1 TU_DEBUG=noconform BOX64_UNITYPLAYER=1";
     public static final String DEFAULT_SCREEN_SIZE = "1280x720";
     public static final String DEFAULT_AUDIO_DRIVER = AudioDrivers.ALSA;
     public static final String DEFAULT_DXWRAPPER = DXWrappers.DXVK;
@@ -46,7 +53,10 @@ public class Container {
     private String cpuList;
     private String cpuListWoW64;
     private String desktopTheme = WineThemeManager.DEFAULT_DESKTOP_THEME;
-    private String box64Preset = Box64Preset.DEFAULT;
+    // 上游默认是 Box64Preset.DEFAULT（= PERFORMANCE）。
+    // Winlator 自己的 README 明确写了：Unity 引擎的游戏要把 Box64 预设改成 Stability，
+    // 否则稳定性有问题。AIC 就是 Unity 游戏，所以这里把默认值改成 STABILITY。
+    private String box64Preset = Box64Preset.STABILITY;
     private File rootDir;
     private JSONObject extraData;
 

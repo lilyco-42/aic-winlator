@@ -45,6 +45,14 @@ public abstract class RootFSInstaller {
     }
 
     public static void install(final MainActivity activity) {
+        install(activity, null);
+    }
+
+    /**
+     * @param onComplete 装完（无论成功失败）回调，用来串「装完就建容器并拉起游戏」。
+     *                   传 null 等价于上游行为。回调在后台线程执行。
+     */
+    public static void install(final MainActivity activity, final Runnable onComplete) {
         AppUtils.keepScreenOn(activity);
         RootFS rootFS = RootFS.find(activity);
         final File rootDir = rootFS.getRootDir();
@@ -74,12 +82,22 @@ public abstract class RootFSInstaller {
             else AppUtils.showToast(activity, R.string.unable_to_install_system_files);
 
             dialog.closeOnUiThread();
+            if (onComplete != null) onComplete.run();
         });
     }
 
     public static void installIfNeeded(final MainActivity activity) {
+        installIfNeeded(activity, null);
+    }
+
+    public static void installIfNeeded(final MainActivity activity, Runnable onComplete) {
         RootFS rootFS = RootFS.find(activity);
-        if (!rootFS.isValid() || rootFS.getVersion() < LATEST_VERSION) install(activity);
+        if (!rootFS.isValid() || rootFS.getVersion() < LATEST_VERSION) {
+            install(activity, onComplete);
+        }
+        else if (onComplete != null) {
+            onComplete.run();
+        }
     }
 
     private static void clearOptDir(File optDir) {

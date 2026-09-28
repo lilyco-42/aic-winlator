@@ -25,6 +25,7 @@ import androidx.fragment.app.FragmentManager;
 import androidx.preference.PreferenceManager;
 
 import com.google.android.material.navigation.NavigationView;
+import com.winlator.aic.AicSetup;
 import com.winlator.contentdialog.AboutDialog;
 import com.winlator.core.AppUtils;
 import com.winlator.core.Callback;
@@ -46,6 +47,8 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
     private Callback<Uri> openFileCallback;
     private SharedPreferences preferences;
     private Fragment currentFragment;
+    /** 本次 onCreate 是否应该「装完 rootfs 就自动进游戏」，见 onCreate 里的说明。 */
+    private boolean aicAutoLaunch = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -79,7 +82,17 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             actionBar.setHomeAsUpIndicator(R.drawable.icon_action_bar_menu);
             onNavigationItemSelected(navigationView.getMenu().findItem(menuItemId));
             navigationView.setCheckedItem(menuItemId);
-            if (!requestAppPermissions()) RootFSInstaller.installIfNeeded(this);
+
+            // AIC 定制版：只有「从桌面图标冷启动」才自动进游戏。
+            //
+            // 判据用 isTaskRoot() 而不是「第一次运行」标志位，因为它天然排除了两个误触发场景：
+            //   - 从游戏里退出 → MainActivity 走 onResume 复用，onCreate 不会再执行；
+            //   - XServerDisplayActivity 里点「编辑触屏布局」拉起的 MainActivity 是新实例，
+            //     isTaskRoot() 为 false。
+            // 于是「从图标冷启动」就等价于 savedInstanceState == null && isTaskRoot()。
+            aicAutoLaunch = savedInstanceState == null && isTaskRoot();
+
+            if (!requestAppPermissions()) RootFSInstaller.installIfNeeded(this, getAicLaunchCallback());
 
             int containerId = intent.getIntExtra("container_id", 0);
             String startPath = intent.getStringExtra("start_path");
@@ -99,7 +112,7 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_WRITE_EXTERNAL_STORAGE_REQUEST_CODE) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                RootFSInstaller.installIfNeeded(this);
+                RootFSInstaller.installIfNeeded(this, getAicLaunchCallback());
             }
             else finish();
         }
@@ -142,6 +155,11 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 
     public void setOpenFileCallback(Callback<Uri> openFileCallback) {
         this.openFileCallback = openFileCallback;
+    }
+
+    /** 只有冷启动那次才把「进游戏」串到 rootfs 安装完成之后。 */
+    private Runnable getAicLaunchCallback() {
+        return aicAutoLaunch ? () -> AicSetup.onRootFSReady(this) : null;
     }
 
     private boolean requestAppPermissions() {

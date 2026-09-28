@@ -619,8 +619,13 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             rootView.addView(frameRating);
         }
 
-        if (shortcut != null) {
-            String controlsProfile = shortcut.getExtra("controlsProfile");
+        // 触屏布局来源：优先快捷方式，其次容器。
+        //
+        // 上游只看 shortcut，也就是「必须先在 Winlator 里建一个快捷方式才有触屏按键」。
+        // AIC 定制版是「点图标直接进游戏」（走 exec_path，没有快捷方式），
+        // 所以这里补上容器级这条回退路径，否则进游戏后没有任何按键、根本没法玩。
+        if (container != null) {
+            String controlsProfile = shortcut != null ? shortcut.getExtra("controlsProfile") : container.getExtra("controlsProfile");
             if (!controlsProfile.isEmpty()) {
                 ControlsProfile profile = inputControlsManager.getProfile(Integer.parseInt(controlsProfile));
                 if (profile != null) showInputControls(profile);

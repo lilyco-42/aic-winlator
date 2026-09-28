@@ -5,7 +5,11 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.winlator'
+        // 注意：改包名必须同步改三处硬编码（否则运行期才炸，很难查）
+        //   1. AppUtils.INTERNAL_STORAGE   —— E: 盘的宿主路径
+        //   2. AndroidManifest 的 FileProvider authorities
+        //   3. FileUtils 里 getUriForFile 用的同一个 authority 字面量
+        applicationId 'com.lilyco42.aicwinlator'
         minSdkVersion 26
         targetSdkVersion 28
         versionCode 33
