@@ -1,0 +1,98 @@
+name: Build APK
+
+# 目的：在 GitHub Actions 上构建 Winlator（AIC 定制版）的 arm64-v8a APK。
+# 本机没有 NDK / platform-35，而且 NDK 构建很重，所以构建放在 CI。
+#
+# 关键版本（必须与 app/build.gradle 对齐，不能随手升）：
+#   - JDK 17
+#   - Gradle 8.14.5（wrapper 自带）
+#   - AGP 8.4.2
+#   - compileSdk 35  → platforms;android-35
+#   - NDK 24.0.8215888（= r24）  → 直接下 zip，不走 sdkmanager（新版 CLI 已改名）
+#   - CMake 3.22.1
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK (cmdline-tools 11076708)
+        run: |
+          set -euo pipefail
+          SDK="$HOME/android-sdk"
+          mkdir -p "$SDK/cmdline-tools"
+          curl -sSL -o /tmp/cmdtools.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/cmdtools.zip -d "$SDK/cmdline-tools"
+          mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK"     >> "$GITHUB_ENV"
+          echo "PATH=$SDK/cmdline-tools/latest/bin:$PATH" >> "$GITHUB_ENV"
+
+      - name: Accept licenses + install platform 35 / platform-tools / cmake
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "cmake;3.22.1"
+          ls "$ANDROID_SDK_ROOT/platforms"
+          ls "$ANDROID_SDK_ROOT/cmake"
+
+      - name: Install NDK r24 (24.0.8215888)
+        run: |
+          set -euo pipefail
+          mkdir -p "$ANDROID_SDK_ROOT/ndk"
+          curl -sSL -o /tmp/ndk.zip \
+            https://dl.google.com/android/repository/android-ndk-r24-linux.zip
+          unzip -q /tmp/ndk.zip -d "$ANDROID_SDK_ROOT/ndk"
+          # AGP 按 android.ndkVersion 去 $SDK/ndk/<version> 找，所以目录名必须是版本号
+          mv "$ANDROID_SDK_ROOT/ndk/android-ndk-r24" "$ANDROID_SDK_ROOT/ndk/24.0.8215888"
+          ls "$ANDROID_SDK_ROOT/ndk"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Build debug APK
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Show APK info
+        run: |
+          set -euo pipefail
+          ls -la app/build/outputs/apk/debug/
+          for f in app/build/outputs/apk/debug/*.apk; do
+            echo "=== $f ==="
+            unzip -l "$f" | grep -E "lib/|classes|AndroidManifest" | head -20
+          done
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: winlator-apk-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
