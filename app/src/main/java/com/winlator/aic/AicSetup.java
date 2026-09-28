@@ -2,6 +2,8 @@ package com.winlator.aic;
 
 import android.content.Context;
 import android.content.Intent;
+import android.os.Handler;
+import android.os.Looper;
 import android.widget.Toast;
 
 import com.winlator.MainActivity;
@@ -13,6 +15,7 @@ import com.winlator.container.ContainerManager;
 import com.winlator.container.DXWrappers;
 import com.winlator.core.AppUtils;
 import com.winlator.core.FileUtils;
+import com.winlator.xenvironment.RootFSInstaller;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -71,10 +74,20 @@ public final class AicSetup {
     // ------------------------------------------------------------------ 入口
 
     /**
-     * rootfs 装完（或已就绪）之后调用。必须在主线程调用 ——
-     * {@link ContainerManager#createContainerAsync} 内部要 new Handler()，没有 Looper 会抛。
+     * rootfs 装完（或已就绪）之后调用。任意线程都可以调 —— 内部会自己切到主线程。
+     *
+     * <p>为什么必须切：{@link RootFSInstaller} 的完成回调是在
+     * {@code Executors.newSingleThreadExecutor()} 的线程上跑的，而
+     * {@link ContainerManager#createContainerAsync} 第一件事就是 {@code new Handler()}，
+     * 在没调过 {@code Looper.prepare()} 的线程上会直接抛
+     * {@code RuntimeException: Can't create handler inside thread ...}。
+     * （这个坑是实测踩出来的：第一次在模拟器上跑就崩在这里。）
      */
     public static void onRootFSReady(final MainActivity activity) {
+        new Handler(Looper.getMainLooper()).post(() -> onRootFSReadyOnMainThread(activity));
+    }
+
+    private static void onRootFSReadyOnMainThread(final MainActivity activity) {
         ContainerManager manager = new ContainerManager(activity);
 
         Container container = findContainer(manager);
