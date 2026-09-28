@@ -3,6 +3,7 @@
     <string name="app_name">Alice in Cradle</string>
     <string name="aic_game_missing">没找到游戏本体。\n\n请把整个 AliceInCradle 文件夹放到手机的 Download 目录下，也就是：\n%1$s\n\n放好后重新打开本应用。</string>
     <string name="aic_container_failed">创建容器失败，请重启应用重试。</string>
+    <string name="aic_launch_skipped">刚启动过游戏，这次先不进 —— 免得反复重启。你可以在下面改容器参数，或者直接点「快捷方式」里的 Alice in Cradle 再试。</string>
     <string name="run">Run</string>
     <string name="edit">Edit</string>
     <string name="remove">Remove</string>

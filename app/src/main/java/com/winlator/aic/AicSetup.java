@@ -180,10 +180,12 @@ public final class AicSetup {
      * 在容器的桌面目录写一个 .desktop，让 Winlator 的「快捷方式」页里也能看到这个游戏。
      *
      * <p><b>Exec 那一行为什么反斜杠要写四个</b>：这是实测出来的，不是猜的。
-     * {@link com.winlator.core.StringUtils#unescapeDOSPath} 会连续两轮把 {@code \X} 折成 {@code X}，
+     * {@link com.winlator.core.StringUtils#unescapeDOSPath} 里串了三次替换：
+     * 先把 {@code \X} 折成 {@code X} 连做两轮，最后再把残留的 {@code \\} 折成 {@code \}。
      * 所以文件里必须写 {@code D:\\\\AliceInCradle\\\\AliceInCradle.exe} 才能还原成
-     * {@code D:\AliceInCradle\AliceInCradle.exe}。写一个或两个反斜杠都会被吃光，
-     * 变成一个没有分隔符的怪字符串，然后 getDirname() 直接抛异常。
+     * {@code D:\AliceInCradle\AliceInCradle.exe}。
+     * 写一个会被吃光（{@code D:AliceInCradle...}），写两个也一样被两轮吃完；
+     * 结果是没有任何分隔符的怪字符串，{@code Shortcut} 之后取目录时直接抛异常。
      *
      * <p>快捷方式只是「顺手」—— 主路径是自动启动，所以这里失败也不影响进游戏。
      */

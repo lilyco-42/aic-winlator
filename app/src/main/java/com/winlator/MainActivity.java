@@ -10,6 +10,7 @@ import android.content.res.Configuration;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.MenuItem;
+import android.widget.Toast;
 
 import androidx.annotation.IntRange;
 import androidx.annotation.NonNull;
@@ -49,6 +50,18 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
     private Fragment currentFragment;
     /** 本次 onCreate 是否应该「装完 rootfs 就自动进游戏」，见 onCreate 里的说明。 */
     private boolean aicAutoLaunch = false;
+    /** 上一次真正拉起游戏的时间戳（毫秒），用来做防抖。 */
+    private static final String PREF_AIC_LAST_LAUNCH = "aic_last_launch_time";
+    /**
+     * 自动进游戏之后的冷却时间。
+     *
+     * <p>为什么需要：自动启动是「无条件」的 —— 只要从桌面图标冷启动就会进游戏。
+     * 如果游戏起不来（黑屏闪退、DXVK 初始化失败……），用户退回主界面，
+     * 下一次冷启动又会立刻再自动进一次，形成**崩溃死循环**，而且他没有任何逃生通道。
+     * 冷却期内不再自动进，直接把上游 Winlator 的完整界面给他 —— 那里能改容器参数、
+     * 看日志、换 Box64 预设。这是「不要让人点注定失败的按钮」那条规矩的兜底。
+     */
+    private static final long AIC_AUTO_LAUNCH_COOLDOWN_MS = 30_000L;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -90,7 +103,12 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             //   - XServerDisplayActivity 里点「编辑触屏布局」拉起的 MainActivity 是新实例，
             //     isTaskRoot() 为 false。
             // 于是「从图标冷启动」就等价于 savedInstanceState == null && isTaskRoot()。
-            aicAutoLaunch = savedInstanceState == null && isTaskRoot();
+            //
+            // 再加一道冷却：刚自动进过游戏、马上就又冷启动了，说明那次多半是没起来。
+            // 这时候不再自动进，把完整界面留给用户（见 AIC_AUTO_LAUNCH_COOLDOWN_MS）。
+            boolean inCooldown = isInAicLaunchCooldown();
+            aicAutoLaunch = savedInstanceState == null && isTaskRoot() && !inCooldown;
+            if (inCooldown) Toast.makeText(this, R.string.aic_launch_skipped, Toast.LENGTH_LONG).show();
 
             if (!requestAppPermissions()) RootFSInstaller.installIfNeeded(this, getAicLaunchCallback());
 
@@ -159,7 +177,19 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
 
     /** 只有冷启动那次才把「进游戏」串到 rootfs 安装完成之后。 */
     private Runnable getAicLaunchCallback() {
-        return aicAutoLaunch ? () -> AicSetup.onRootFSReady(this) : null;
+        if (!aicAutoLaunch) return null;
+        return () -> {
+            // 时间戳打在「真正拉起游戏之前」，而不是 onCreate 里 ——
+            // 首次运行装 rootfs 可能要一分钟，打在 onCreate 会让冷却期提前过期。
+            preferences.edit().putLong(PREF_AIC_LAST_LAUNCH, System.currentTimeMillis()).apply();
+            AicSetup.onRootFSReady(this);
+        };
+    }
+
+    /** 上一次自动进游戏之后，是否还在冷却期内。 */
+    private boolean isInAicLaunchCooldown() {
+        long last = preferences.getLong(PREF_AIC_LAST_LAUNCH, 0L);
+        return last > 0L && System.currentTimeMillis() - last < AIC_AUTO_LAUNCH_COOLDOWN_MS;
     }
 
     private boolean requestAppPermissions() {
