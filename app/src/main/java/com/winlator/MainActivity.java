@@ -120,7 +120,12 @@ public class MainActivity extends AppCompatActivity implements NavigationView.On
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 RootFSInstaller.installIfNeeded(this, getAicLaunchCallback());
             }
-            else finish();
+            else {
+                // 上游这里是直接 finish()，用户看到的就是「点开图标闪一下就没了」，
+                // 不知道发生了什么。这里补一句人话再说再见。
+                Toast.makeText(this, R.string.aic_permission_denied, Toast.LENGTH_LONG).show();
+                finish();
+            }
         }
     }
 
