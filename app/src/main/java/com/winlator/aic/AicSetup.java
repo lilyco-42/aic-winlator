@@ -2,9 +2,12 @@ package com.winlator.aic;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 import android.widget.Toast;
+
+import androidx.preference.PreferenceManager;
 
 import com.winlator.MainActivity;
 import com.winlator.R;
@@ -55,6 +58,20 @@ public final class AicSetup {
     /** 内置触屏布局 id —— 对应 assets/inputcontrols/profiles/controls-5.icp。 */
     public static final String CONTROLS_PROFILE_ID = "5";
 
+    /** 上一次真正拉起游戏的时间戳（毫秒），用来做冷却防抖。 */
+    private static final String PREF_LAST_LAUNCH = "aic_last_launch_time";
+
+    /**
+     * 自动进游戏之后的冷却时间。
+     *
+     * <p>为什么需要：自动启动是「无条件」的 —— 只要从桌面图标冷启动就会进游戏。
+     * 如果游戏起不来（黑屏闪退、DXVK 初始化失败……），用户退回主界面，
+     * 下一次冷启动又会立刻再自动进一次，形成**崩溃死循环**，而且他没有任何逃生通道。
+     * 冷却期内不再自动进，直接把上游 Winlator 的完整界面给他 —— 那里能改容器参数、
+     * 看日志、换 Box64 预设。这是「不要让人点注定失败的按钮」那条规矩的兜底。
+     */
+    private static final long LAUNCH_COOLDOWN_MS = 30_000L;
+
     private AicSetup() {}
 
     // ------------------------------------------------------------------ 路径
@@ -69,6 +86,29 @@ public final class AicSetup {
 
     public static boolean isGamePresent() {
         return getGameExe().isFile();
+    }
+
+    // ------------------------------------------------------------------ 冷却防抖
+
+    private static SharedPreferences prefs(Context context) {
+        return PreferenceManager.getDefaultSharedPreferences(context);
+    }
+
+    /** 上一次自动进游戏之后，是否还在冷却期内。 */
+    public static boolean isInLaunchCooldown(Context context) {
+        long last = prefs(context).getLong(PREF_LAST_LAUNCH, 0L);
+        return last > 0L && System.currentTimeMillis() - last < LAUNCH_COOLDOWN_MS;
+    }
+
+    /**
+     * 记一次「真的要把游戏拉起来了」。
+     *
+     * <p>刻意只在 {@link #launchGame} 之前调 —— 不能挪到更早的地方。
+     * 如果游戏本体缺失（只弹了个提示、根本没启动），就不该记，
+     * 否则用户刚把游戏拷进去、马上重开，会被冷却挡在门外，还得等 30 秒。
+     */
+    private static void recordLaunch(Context context) {
+        prefs(context).edit().putLong(PREF_LAST_LAUNCH, System.currentTimeMillis()).apply();
     }
 
     // ------------------------------------------------------------------ 入口
@@ -166,6 +206,7 @@ public final class AicSetup {
     }
 
     private static void launchGame(MainActivity activity, Container container) {
+        recordLaunch(activity);
         Intent intent = new Intent(activity, XServerDisplayActivity.class);
         intent.putExtra("container_id", container.id);
         // 必须是 unix 路径：XServerDisplayActivity 会拿它过 WineUtils.unixToDOSPath，
