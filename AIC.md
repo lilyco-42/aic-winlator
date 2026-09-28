@@ -179,10 +179,26 @@ bash deploy.sh out/winlator-apk-debug/app-debug.apk
 
 - **不能和正版 Winlator 共存**：包名虽然改成了 `com.lilyco42.aicwinlator`，但如果手机上
   已装过用别的签名打包的同包名应用，需要先卸载。
+- **每次 CI 构建的签名都不一样**：runner 上的 debug keystore 是临时生成的。
+  所以 `adb install -r` 会报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`，
+  `deploy.sh` 会自动降级成「卸载 → 安装」。代价是 `/data/data` 被清空，
+  首次启动要重新解一遍 rootfs（约 1 分钟）。**这是刻意的取舍**：
+  固定签名需要往仓库或 Secret 里放一份密钥，不值得为 debug 包这么做。
 - **只出 arm64-v8a**：上游 debug buildType 就只编 `arm64-v8a`。32 位 ARM 机型不支持。
 - **游戏本体需自行准备**：本仓库不含游戏任何内容。
+- **首启要联网吗？不用**。`rootfs.tzst`(65MB) / `container_pattern.tzst` / `winecomponents`
+  / `graphics_driver` 全部打包在 `assets/` 里，安装完就是自包含的。
 - 触屏布局是按[官方键位表](https://aicwiki.com/zh/home/control-guide)做的初版，
   实机手感需要按个人习惯在 Winlator 的「输入控制」里微调。
+
+### 首启会发生什么（按实测顺序）
+
+1. 弹「允许 Alice in Cradle 访问照片、视频、音乐和其他文件？」
+   （targetSdk=28 走的是 Android 13+ 的兼容路径）—— **必须点允许**，
+   否则读不到 `Download` 下的游戏文件。拒绝的话现在会弹一句说明再退出，
+   不会像上游那样「闪一下就没了」。
+2. 解 rootfs，约 1 分钟，**一次性**（离线可完成）。
+3. 自动建容器（`Alice in Cradle`）+ 写快捷方式 + 直接进游戏。
 
 ---
 
@@ -198,9 +214,27 @@ bash deploy.sh out/winlator-apk-debug/app-debug.apk
 | 快捷方式真的落盘 | 模拟器上 `run-as cat '.../Alice in Cradle.desktop'` | `Exec=wine D:\\\\AliceInCradle\\\\AliceInCradle.exe` / `execArgs=-force-gfx-direct` ✅ |
 | `-force-gfx-direct` 注入链 | 读代码 + 追调用顺序 | `applyStartupWorkarounds`（:224）→ `EnvVarsWorkaround` → `getWineStartCommand()`（:999）消费 ✅ |
 | 首启不崩 | 模拟器冷启动 | 无崩溃，容器 + 快捷方式都建好 ✅ |
+| 触屏布局真的能加载 | 模拟器上打开「输入控制」 | Profile 下拉框显示 `Alice in Cradle`，`controls-5.icp` 已拷进 `/data/data/.../files/profiles/`（MD5 与仓库一致）✅ |
+| 触屏布局坐标正确 | 横屏截图逐点比对 | 15 个按键位置与设计值逐一吻合（D_PAD 0.11/0.69、Z 0.83/0.70、跑 0.64/0.85 …）✅ |
+| `-force-gfx-direct` 是 Unity 认的参数 | `strings UnityPlayer.dll` | 该参数名确实存在于这个 Unity 2022.3.62f2 的运行时里 ✅ |
+| Box64 `STABILITY` 预设存在 | `Box64Preset.java` | 存在；且上游 `DEFAULT = PERFORMANCE` ✅ |
+| 冷却防抖真的生效 | 模拟器：冷启动 → 24s 内再冷启动 | 第二次**没有**再次拉起游戏（时间戳未变），并停在 Winlator 完整界面 ✅ |
+| 冷却过期后能恢复 | 模拟器：等 32s 后再冷启动 | 恢复自动进游戏（时间戳刷新）✅ |
+| 部署脚本 | `deploy.sh` 全流程（假游戏目录） | 安装 / 建目录 / 推送 / 可读性核对全通过 ✅ |
 
 **没验到、也验不了的**：模拟器是 **x86_64**（带 `libndk_translation` 翻译层），
 而 Box64 是 x86_64→ARM64 的翻译器 —— 在 x86_64 上跑等于套两层翻译，
 得到的失败信号全是模拟器特有的，没有参考价值。
 **所以「能不能进游戏 / 音频对不对 / 帧率多少」只能在真机（一加 15 / PLK110）上验。**
+
+### 真机上按这个顺序试
+
+| # | 试什么 | 怎么改 | 期望 |
+|---|---|---|---|
+| 1 | 默认配置直接跑 | 什么都不用改 | 能进标题画面 |
+| 2 | 花屏 / 黑屏 | 容器设置 → 图形驱动 `Vortek` → `Turnip` | 画面正常 |
+| 3 | 仍不行 | 换 DX 转换层 `DXVK` → `WineD3D` | 至少能看到画面 |
+| 4 | 画面有但很卡 | Box64 预设 `Stability` → 别的 | 提帧 |
+| 5 | 顺带一试（免费） | 启动参数加 `-force-vulkan` | 若这个构建编了 Vulkan 后端，就能绕开 DXVK 直通真 Vulkan，会明显更快。**未验证这个构建支不支持**：游戏自己的着色器在 `StreamingAssets` 的 UnityFS 包里（压缩的，裸扫扫不到 SPIR-V），而 `resources.assets`/`globalgamemanagers.assets` 里只找到 DXBC。 |
+| 6 | 音频没声 / 爆音 | 容器设置 → 音频驱动 `ALSA` ↔ `PulseAudio` | 有声。**这是最可能出问题的一项**：CRIWARE 依赖 `MFPlat.DLL`，而 Winlator 没有 mfplat 组件，只能吃 Wine 内建 |
 
