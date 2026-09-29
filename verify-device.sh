@@ -36,6 +36,17 @@ fi
 mkdir -p "$OUT_DIR"
 say() { printf '\n=== %s ===\n' "$*"; }
 
+# 进程存活检测。
+# 不能用 `pidof $PKG`：进程被 SIGSEGV 干掉后，内核会留下 crash_dump64，
+# 它的 argv 里含包名 → pidof 仍能匹配到，看起来「还活着」，掩盖了崩溃。
+# 另外 crash_dump64 的 uid 是普通用户，普通 pidof 在某些 ROM 上其实匹配不到，
+# 行为不一致 —— 索性改成只看 /proc/<pid>/cmdline 与 comm 是否恰好等于包名。
+proc_alive() {
+    local pid
+    pid=$("${ADB[@]}" shell "ps -A -o PID,NAME 2>/dev/null | awk '\$2==\"$PKG\"{print \$1}'" 2>/dev/null | tr -d '\r' | head -1)
+    [ -n "$pid" ] && printf '%s' "$pid"
+}
+
 # ---------------------------------------------------------------- 1. 前置体检
 say "1/4 前置体检"
 
@@ -130,16 +141,32 @@ SAMPLE="$OUT_DIR/samples.tsv"
 : > "$SAMPLE"
 printf 'sec\tpid\ttopActivity\taic_last_launch\n' >> "$SAMPLE"
 
+# 读 AicSetup 写进去的「上次拉起游戏的时间戳」。
+# 先试 run-as（debug 包可用）；有些 ROM/加固方案会拒 run-as，退回 run-as + cat 的
+# 另一种写法。两条都失败就返回空，不代表出错 —— samples.tsv 里留空即可。
+read_launch_ts() {
+    local xml
+    xml=$("${ADB[@]}" shell "run-as $PKG cat /data/data/$PKG/shared_prefs/${PKG}_preferences.xml" 2>/dev/null)
+    if ! printf '%s' "$xml" | grep -q aic_last_launch_time; then
+        xml=$("${ADB[@]}" shell "run-as $PKG sh -c 'cat /data/data/$PKG/shared_prefs/${PKG}_preferences.xml'" 2>/dev/null)
+    fi
+    printf '%s' "$xml" | grep -o 'aic_last_launch_time" value="[0-9]*' | grep -o '[0-9]*$'
+}
+
 FIRST_LAUNCH=""
 for i in $(seq 1 12); do
     sleep 10
-    PID=$("${ADB[@]}" shell pidof "$PKG" 2>/dev/null | tr -d '\r')
+    PID=$(proc_alive)
     TOP=$("${ADB[@]}" shell dumpsys activity activities 2>/dev/null \
           | grep -m1 topResumedActivity | sed 's/.*u0 //;s/ .*//' | tr -d '\r')
-    TS=$("${ADB[@]}" shell "run-as $PKG cat /data/data/$PKG/shared_prefs/${PKG}_preferences.xml" 2>/dev/null \
-          | grep -o 'aic_last_launch_time" value="[0-9]*' | grep -o '[0-9]*$')
+    TS=$(read_launch_ts)
     printf '%s\t%s\t%s\t%s\n' "$((i*10))" "${PID:-DEAD}" "${TOP:-?}" "${TS:-}" >> "$SAMPLE"
     [ -n "$TS" ] && [ -z "$FIRST_LAUNCH" ] && FIRST_LAUNCH="$TS"
+    # 进程一旦消失就直接收尾，不用空等满 120 秒
+    if [ -z "$PID" ] && [ "$i" -ge 2 ]; then
+        echo ">> 第 $((i*10)) 秒进程已不在，提前结束采样"
+        break
+    fi
     # 到点就各存一张图
     case $i in 2|4|6|12) "${ADB[@]}" exec-out screencap -p > "$OUT_DIR/shot_$((i*10))s.png" 2>/dev/null ;;
     esac
