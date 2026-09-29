@@ -60,6 +60,13 @@ public class InputControlsView extends View {
     private Timer mouseMoveTimer;
     private final PointF mouseMoveOffset = new PointF();
     private boolean showTouchscreenControls = true;
+    // 「游戏画面区」的宽度（像素）。用于把触屏控件摆进画面内，而不是铺满全屏。
+    //
+    // 背景：游戏画面按 container.screenSize 缩放后**居中**显示，屏幕比 16:9 更宽时
+    // 两侧会留黑边（实测 2376x1080 → 画面只有 1920 宽，两侧各 228px 黑边）。
+    // 如果控件按全屏宽归一化，贴边的按键就会被推进黑边区，拇指够不到。
+    // 0 表示未知 —— 此时退回「按全屏宽」的旧行为。
+    private int viewportWidth = 0;
 
     public InputControlsView(Context context) {
         super(context);
@@ -88,6 +95,18 @@ public class InputControlsView extends View {
 
     public int getSnappingSize() {
         return snappingSize;
+    }
+
+    /**
+     * 游戏「画面区」的宽度（像素）；0 = 未知（按全屏宽处理）。
+     * 触屏控件按这个宽度归一化，确保落在画面内而不是被推到黑边。
+     */
+    public int getViewportWidth() {
+        return viewportWidth > 0 ? viewportWidth : getMaxWidth();
+    }
+
+    public void setViewportWidth(int viewportWidth) {
+        this.viewportWidth = Math.max(0, viewportWidth);
     }
 
     @Override

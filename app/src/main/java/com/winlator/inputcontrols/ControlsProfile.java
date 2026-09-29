@@ -241,8 +241,31 @@ public class ControlsProfile implements Comparable<ControlsProfile>, GamepadSlot
                     element.setType(ControlElement.Type.valueOf(elementJSONObject.getString("type")));
                     element.setShape(ControlElement.Shape.valueOf(elementJSONObject.getString("shape")));
                     element.setToggleSwitch(elementJSONObject.getBoolean("toggleSwitch"));
-                    element.setX((int)(elementJSONObject.getDouble("x") * inputControlsView.getMaxWidth()));
-                    element.setY((int)(elementJSONObject.getDouble("y") * inputControlsView.getMaxHeight()));
+                    // ── 坐标换算：按「画面区」而不是「全屏」来摆控件 ──────────────
+                    //
+                    // 起因：布局文件里的 x/y 是 0~1 的归一化值，原本直接乘全屏宽高。
+                    // 但游戏画面是按 container 的 screenSize(如 1280x720) 缩放后
+                    // **居中**显示的；屏幕比 16:9 更宽时（例如 2376x1080 = 2.2:1），
+                    // 画面两侧有大片黑边。
+                    //
+                    // 后果：原本贴右边的按键（x=0.955）会被推到物理边缘 ——
+                    // 换算到画面坐标系里甚至 > 1.0（跑到画面外的黑边区），
+                    // 拇指根本够不到。实测就是这样，「取消」按钮落在画面外。
+                    //
+                    // 修法：把归一化 x 先映射到「画面在屏幕上占的那一段」，
+                    // 用 viewportWidth/getMaxWidth() 作为可用的横向上限，
+                    // 并把整段**居中**。这样一份布局在任何屏幕比例下都落在画面内，
+                    // 且拇指可达性一致（不再随屏幕变宽而被推远）。
+                    //
+                    // y 不需要处理：画面在纵向总是占满（宽屏时纵向填满），
+                    // 且纵向偏移会破坏「底部按键在底部」的直觉。
+                    final float maxWidth = inputControlsView.getMaxWidth();
+                    final float maxHeight = inputControlsView.getMaxHeight();
+                    final float viewportWidth = inputControlsView.getViewportWidth();
+                    final float xNorm = (float)elementJSONObject.getDouble("x");
+                    final float xOffset = Math.max(0f, (maxWidth - viewportWidth) / 2f);
+                    element.setX((int)(xOffset + xNorm * Math.min(maxWidth, viewportWidth)));
+                    element.setY((int)(elementJSONObject.getDouble("y") * maxHeight));
                     element.setScale((float)elementJSONObject.getDouble("scale"));
                     element.setText(elementJSONObject.getString("text"));
                     element.setIconId(elementJSONObject.getInt("iconId"));
