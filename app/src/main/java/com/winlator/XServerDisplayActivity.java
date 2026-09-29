@@ -647,6 +647,13 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 }
             }
             if (viewportWidth > 0) inputControlsView.setViewportWidth((int)viewportWidth);
+            // 诊断用：在设备上直接看这几个数对不对（logcat -s AICViewport）
+            android.util.Log.i("AICViewport", "screen=" + screenW + "x" + screenH
+                    + " screenSize=" + screenSize
+                    + " viewportWidth=" + (int)viewportWidth
+                    + " viewWidth=" + inputControlsView.getMaxWidth()
+                    + " viewHeight=" + inputControlsView.getMaxHeight()
+                    + " dmAspect=" + ((float) Math.max(screenW, screenH) / Math.min(screenW, screenH)));
         }
         rootView.addView(inputControlsView);
 
