@@ -1094,11 +1094,70 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         FileUtils.delete(new File(rootDir, "/opt/apps"));
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "rootfs_patches.tzst", rootDir);
         TarCompressorUtils.extract(TarCompressorUtils.Type.ZSTD, this, "pulseaudio.tzst", new File(getFilesDir(), "pulseaudio"));
+        scrubTranslatorFingerprints(rootDir);
         WineUtils.applySystemTweaks(this, wineInfo);
         container.putExtra("dxwrapper", null);
         container.putExtra("desktopTheme", null);
         SettingsFragment.resetPreferenceVersions(this);
     }
+
+    // ── 抹掉 Winlator / 翻译层的文件系统指纹 ────────────────────────────────
+    //
+    // 为什么需要这一步：
+    //   rootfs_patches.tzst 每次启动都会把 Winlator 自带的小工具解包到
+    //   opt/apps（以及 C:\Windows 下的 wfm.exe）。这些文件名是**翻译层独有的**，
+    //   真机（一台正常的 Windows PC）上不可能存在：
+    //       Z:\opt\apps\GPUInfo.exe        Z: 映射到 rootfs 根
+    //       Z:\opt\apps\winaddons.exe      （见 .wine/dosdevices 里的 z: 符号链接）
+    //       Z:\opt\apps\TestD3D.exe
+    //       C:\Windows\wfm.exe             Winlator 自带的文件管理器
+    //   部分游戏把这些文件的**存在性**当作"是否运行在模拟器/翻译层里"的判据，
+    //   命中就跳错误场景。
+    //
+    // 为什么要写成规则而不是写死几个文件名：
+    //   硬编码文件名只对"我们已知的这一版检测"有效。游戏下一个版本换个名字查
+    //   （或者换个检查点），就又得重编一次 APK。这里改成两条规则叠加：
+    //     规则一（精确）：已知指纹清单，命中直接删；
+    //     规则二（模式）：名字里含翻译层关键词的**可执行文件**，一律删。
+    //   中性内容（7-Zip 等）不受影响 —— 删多了会弄坏 Winlator 自身功能。
+    //
+    // 注意：必须在 extract 之后调用。extract 每次都会把文件放回来。
+    private void scrubTranslatorFingerprints(File rootDir) {
+        // 规则一：精确指纹清单（opt/apps 下）
+        final String[] exactFingerprints = {
+            "GPUInfo.exe", "winaddons.exe", "TestD3D.exe",
+        };
+        for (String name : exactFingerprints) {
+            FileUtils.delete(new File(rootDir, "/opt/apps/" + name));
+        }
+
+        // 规则二：opt/apps 下名字含翻译层关键词的可执行文件
+        final String[] keywordBlocklist = {
+            "vortek", "virgl", "turnip", "vortex", "gamefusion",
+            "winlator", "box64", "winaddons", "gpuinfo",
+        };
+        File appsDir = new File(rootDir, "/opt/apps");
+        File[] appsChildren = appsDir.listFiles();
+        if (appsChildren != null) {
+            for (File child : appsChildren) {
+                String lower = child.getName().toLowerCase();
+                if (!(lower.endsWith(".exe") || lower.endsWith(".bat") || lower.endsWith(".cmd"))) continue;
+                for (String kw : keywordBlocklist) {
+                    if (lower.contains(kw)) {
+                        FileUtils.delete(child);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // C:\Windows\wfm.exe —— 只在 startupSelection 走 fallback 时才被 Winlator 用到；
+        // 直接启动某个 exe 的容器用不到它，删掉不影响启动，但能抹掉指纹。
+        // 保留 winhandler.exe（它是启动链的必需组件，删了容器起不来）。
+        File wfm = new File(rootDir, "/home/xuser/.wine/drive_c/windows/wfm.exe");
+        if (wfm.exists()) FileUtils.delete(wfm);
+    }
+
 
     public void changeFrameRatingVisibility(Window window, boolean visible) {
         if (frameRating == null) return;

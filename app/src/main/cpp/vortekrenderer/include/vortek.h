@@ -1,5 +1,38 @@
 #define HEADER_SIZE 8
-#define DEVICE_NAME "Vortek (%s)"
+// 上报给 DXVK / 游戏 VkPhysicalDeviceProperties.deviceName 的物理设备名。
+//
+// 原来是 "Vortek (%s)"，即把宿主真实 GPU 名包一层前缀，例如：
+//     Vortek (Adreno (TM) 750)
+// 前缀会一路透传到 D3D11 的 DXGI_ADAPTER_DESC，最终成为 Unity 的
+// SystemInfo.graphicsDeviceName。
+//
+// 问题：这个前缀是 Winlator 系翻译层的独有指纹 —— 真机上永远不会出现
+// "vortek"/"virgl"/"turnip"/"gamefusion" 这类词。部分游戏会据此判定
+// "运行在不受支持的环境"，直接跳错误场景。
+//
+// 改成 "%s" 后只保留宿主真实设备名（Adreno / Mali 等），与真机一致。
+// 注意：只改这里，不要改 driverVersion / driverInfo —— 那些是 Vulkan
+// 报告的版本号，真机本来就和 PC 不同，不是可取巧的指纹。
+#define DEVICE_NAME "%s"
+// 真机上绝对不会出现在 GPU 名里的「翻译层标识词」。
+// 有些游戏的检测不是比对固定前缀，而是「显卡名里含任一黑词」——
+// 那种写法换个翻译层（vortek→virgl→turnip→…）就又能命中，
+// 所以这里的做法是**把黑词从设备名里剔掉**，而不是只删自家前缀。
+//
+// 命中即剔除，例如：
+//     "Vortek (Adreno (TM) 750)"      -> "Adreno (TM) 750"
+//     "Turnip Adreno (TM) 750"        -> "Adreno (TM) 750"
+//     "VirGL (Mali-G78)"              -> "Mali-G78"
+// 这样即使以后换内核、或者游戏加了新词，也只会退化成「名字少一段」，
+// 而不是变成「名字里有翻译层痕迹」。
+//
+// 词表大小写不敏感（见 sanitizeDeviceName），带 "top" 之类的
+// 无害名不会被误伤。
+#define DEVICE_NAME_BLOCKLIST \
+    "vortek", "virgl", "turnip", "vortex", "gamefusion", "winlator", "box64", "wine"
+// 黑词剔除后如果名字被削空，回退成这个中性名，避免上报空字符串
+// （空字符串本身也是异常特征，比一个普通的设备名更可疑）。
+#define DEVICE_NAME_FALLBACK "Generic GPU"
 #define ENABLE_VALIDATION_LAYER 0 // FIXME set to 0 and remove libVkLayer from jniLibs
 #define DEBUG_MODE 0 // FIXME set to 0
 #define MEMORY_POOL_MAX_SIZE 65536

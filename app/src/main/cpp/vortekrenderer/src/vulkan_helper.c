@@ -1,4 +1,5 @@
 #include <string.h>
+#include <ctype.h>   // tolower —— 设备名黑词剔除用（大小写不敏感匹配）
 
 #include "vulkan_helper.h"
 #include "dma_utils.h"
@@ -394,9 +395,119 @@ void checkImageFormatProperties(VkFormat format, VkImageType type, VkImageTiling
     }
 }
 
+// 从设备名里剔除「翻译层标识词」。
+//
+// 与「只删自家前缀」的做法相比，这里按黑词表逐个剔除，好处是：
+//   1. 换翻译层（vortek/virgl/turnip/...）时不用再改代码；
+//   2. 游戏若用 "name 含任一黑词" 而不是 "name 等于固定串" 来判定，
+//      也能一并躲开；
+//   3. 剔完只影响名字的展示，不动任何 Vulkan 能力上报 —— 不会把
+//      一个正常工作的 GPU 描述成不能用的东西。
+//
+// 大小写不敏感匹配。剔完后若名字为空（整个名字就是黑词），回退到一个
+// 中性名，避免上报空串（空串本身比普通设备名更异常）。
+static void sanitizeDeviceName(char* dst, size_t dstSize, const char* src) {
+    static const char* const blocklist[] = { DEVICE_NAME_BLOCKLIST };
+    const size_t blocklistSize = sizeof(blocklist) / sizeof(blocklist[0]);
+
+    snprintf(dst, dstSize, "%s", src ? src : "");
+
+    for (size_t i = 0; i < blocklistSize; i++) {
+        const char* word = blocklist[i];
+        const size_t wordLen = strlen(word);
+        if (wordLen == 0) continue;
+
+        char* pos;
+        char lower[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE] = {0};
+        while (1) {
+            // 逐轮把 dst 转小写后在副本里找，避免依赖 strcasestr（Android bionic 没有）
+            snprintf(lower, sizeof(lower), "%s", dst);
+            for (char* p = lower; *p; p++) *p = (char)tolower((unsigned char)*p);
+            pos = strstr(lower, word);
+            if (!pos) break;
+
+            const size_t offset = (size_t)(pos - lower);
+            memmove(dst + offset, dst + offset + wordLen, strlen(dst + offset + wordLen) + 1);
+        }
+    }
+
+    // 剔除后可能留下多余的括号/空格，收一下尾。
+    //
+    // 典型情况："Vortek (Adreno (TM) 750)" 剔掉 "vortek" 后会变成
+    // "(Adreno (TM) 750)" —— 剩下的是 "（前缀的）括号里装着真实设备名"。
+    // 这一串在**字符级是配平的**（2 个 '(' 2 个 ')'），字符配平算法分辨不出
+    // 哪对括号是被拆散的，所以这里改用一条更贴合实际的规则：
+    //
+    //   真机的 GPU 名字**从不以 '(' 开头**。
+    //
+    // 于是：若结果以 '(' 开头，就去掉这个 '(' 和**对应的尾部 ')'**
+    // （即整串最外层的那一对）。这样：
+    //     "(Adreno (TM) 750)"  -> "Adreno (TM) 750"
+    //     "(Mali-G78)"         -> "Mali-G78"
+    //     "Adreno (TM) 750"    -> 原样保留（不以 '(' 开头）
+    //     "Adreno 750)"        -> 去掉落单的尾部 ')'（见下）
+    {
+        char unwrapped[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE] = {0};
+        size_t n = strlen(dst);
+
+        // 先去掉前导空白 —— 剔除黑词后会留下 " (Adreno (TM) 750)" 这样的
+        // 前导空格，不先去掉的话，下面的「以 '(' 开头」判断会失效。
+        // （尾部空白也顺手去掉，避免干扰 n-1 的比较。）
+        while (n > 0 && (dst[0] == ' ' || dst[0] == '\t')) {
+            memmove(dst, dst + 1, n);
+            n--;
+        }
+        while (n > 0 && (dst[n - 1] == ' ' || dst[n - 1] == '\t')) dst[--n] = '\0';
+
+        // 反复剥掉最外层括号（处理 "(Adreno (TM) 750)" 与叠层 "(...(...)...)"）
+        while (n >= 2 && dst[0] == '(' && dst[n - 1] == ')') {
+            memmove(dst, dst + 1, n - 2);
+            dst[n - 2] = '\0';
+            n -= 2;
+            while (n > 0 && dst[n - 1] == ' ') dst[--n] = '\0';
+        }
+        snprintf(unwrapped, sizeof(unwrapped), "%s", dst);
+
+        // 再处理落单的括号：统计 '(' 与 ')' 的个数，多余的那侧从**尾部**删。
+        int opens = 0, closes = 0;
+        for (size_t i = 0; unwrapped[i]; i++) {
+            if (unwrapped[i] == '(') opens++;
+            else if (unwrapped[i] == ')') closes++;
+        }
+        while (closes > opens) {
+            size_t i = strlen(unwrapped);
+            while (i > 0 && unwrapped[i - 1] != ')') i--;
+            if (i == 0) break;
+            memmove(unwrapped + i - 1, unwrapped + i, strlen(unwrapped + i) + 1);
+            closes--;
+        }
+        while (opens > closes) {
+            char* p = strrchr(unwrapped, '(');
+            if (!p) break;
+            memmove(p, p + 1, strlen(p + 1) + 1);
+            opens--;
+        }
+
+        snprintf(dst, dstSize, "%s", unwrapped);
+    }
+
+    const char* const trimChars = " \t-_,;:";
+    size_t len = strlen(dst);
+    while (len > 0 && strchr(trimChars, dst[len - 1])) dst[--len] = '\0';
+    size_t start = 0;
+    while (dst[start] != '\0' && strchr(trimChars, dst[start])) start++;
+    if (start > 0) memmove(dst, dst + start, strlen(dst + start) + 1);
+
+    if (dst[0] == '\0') snprintf(dst, dstSize, "%s", DEVICE_NAME_FALLBACK);
+}
+
 void checkDeviceProperties(VkContext* context, VkPhysicalDeviceProperties* properties, void* pNext) {
     char deviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE] = {0};
-    sprintf(deviceName, DEVICE_NAME, properties->deviceName);
+    // 先按 DEVICE_NAME 模板套一层（当前是 "%s"，即保持宿主原名），
+    // 再把翻译层标识词剔掉。
+    char templated[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE] = {0};
+    sprintf(templated, DEVICE_NAME, properties->deviceName);
+    sanitizeDeviceName(deviceName, sizeof(deviceName), templated);
     strcpy(properties->deviceName, deviceName);
     properties->apiVersion = context->vkMaxVersion;
 
