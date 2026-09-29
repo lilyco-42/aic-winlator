@@ -5,11 +5,31 @@ android {
     compileSdk 35
 
     defaultConfig {
-        // 注意：改包名必须同步改三处硬编码（否则运行期才炸，很难查）
+        // ⚠️ 包名不能随便改！这里踩过一次，症状极隐蔽：
+        //
+        //   把 applicationId 从 com.winlator 改成别的，APK 能装、能启动、
+        //   容器数据也写得对，但界面永远停在 "Starting up..."，且
+        //   logcat 里没有一行错误、没有子进程、进程还活着。
+        //
+        //   根因：assets/box64/box64-<ver>.tzst 里的 box64 二进制，
+        //   其 ELF PT_INTERP 是**硬编码绝对路径**：
+        //       /data/data/com.winlator/files/rootfs/lib/ld-linux-aarch64.so.1
+        //   包名一改，内核 execve 找不到这个解释器 → ENOENT →
+        //   ProcessBuilder.start() 抛 IOException →
+        //   ProcessHelper.exec() 里 `catch (Exception e) {}` 静默吞掉。
+        //
+        //   实测：PT_INTERP 段只有 64 字节可用，新包名路径需要 75 字节，
+        //   原地 patch 放不下（要移动数据段，风险高）。
+        //   ⇒ 保持 com.winlator，与上游 Winlator 及所有 fork 一致。
+        //
+        // 如果将来确实必须改包名，下面这些地方全都要跟着改：
         //   1. AppUtils.INTERNAL_STORAGE   —— E: 盘的宿主路径
         //   2. AndroidManifest 的 FileProvider authorities
         //   3. FileUtils 里 getUriForFile 用的同一个 authority 字面量
-        applicationId 'com.lilyco42.aicwinlator'
+        //   4. assets/box64/*.tzst 内 box64 的 ELF PT_INTERP（需重打包 tzst）
+        //   5. assets/container_pattern.tzst 内 .wine/dosdevices/z: 软链
+        //      （实测这条会被 Java 侧按容器 drives 配置覆盖，通常不用管）
+        applicationId 'com.winlator'
         minSdkVersion 26
         targetSdkVersion 28
         versionCode 33
