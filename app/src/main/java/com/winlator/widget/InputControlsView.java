@@ -109,6 +109,47 @@ public class InputControlsView extends View {
         this.viewportWidth = Math.max(0, viewportWidth);
     }
 
+    /**
+     * 按「游戏画面等比缩放后居中显示」算出画面区的宽度（像素）。
+     *
+     * 背景：游戏画面按 container.screenSize（如 1280x720）等比缩放后居中显示。
+     * 屏幕比 16:9 更宽时（实测一加 15 横屏 2376x1080 = 2.2:1）画面只占中间约
+     * 1920px，左右各有约 228px 黑边。触屏控件的 x 是 0~1 归一化值，若乘「全屏宽」，
+     * 贴右边设计的按键（x≈0.95）会被推到物理边缘甚至落进黑边，拇指够不到。
+     *
+     * 算法：屏幕高就是画面的高（宽屏时纵向填满），所以
+     *     画面宽 = 短边 × (容器宽 / 容器高)
+     * 再夹到屏幕宽以内（防竖屏，或容器比屏幕更宽时越界）。
+     *
+     * ⚠ 静态方法，供 XServerDisplayActivity（游玩）与 ControlsEditorActivity（编辑）
+     * 共用 —— 两处必须得到完全一样的值，否则「在编辑器里摆好的位置」进游戏会变。
+     *
+     * @param screenSize 容器的 "宽x高"（如 "1280x720"），null/格式错则返回 0
+     */
+    public static int computeViewportWidth(Context context, String screenSize) {
+        if (screenSize == null) return 0;
+        String[] parts = screenSize.split("x");
+        if (parts.length != 2) return 0;
+        try {
+            final float gameW = Float.parseFloat(parts[0].trim());
+            final float gameH = Float.parseFloat(parts[1].trim());
+            if (gameW <= 0 || gameH <= 0) return 0;
+
+            final int screenW = context.getResources().getDisplayMetrics().widthPixels;
+            final int screenH = context.getResources().getDisplayMetrics().heightPixels;
+            final float aspect = gameW / gameH;
+            final int longSide = Math.max(screenW, screenH);
+            final int shortSide = Math.min(screenW, screenH);
+            // 横屏：画面宽 = 短边(高) × 宽高比；竖屏：画面宽 = 短边(宽)
+            float viewportWidth = longSide > shortSide ? shortSide * aspect : shortSide;
+            viewportWidth = Math.min(viewportWidth, longSide);
+            return (int) viewportWidth;
+        }
+        catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
     @Override
     protected synchronized void onDraw(Canvas canvas) {
         int width = getWidth();

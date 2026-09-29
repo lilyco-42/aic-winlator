@@ -57,22 +57,36 @@ public class ControlsEditorActivity extends AppCompatActivity implements View.On
         inputControlsView.setEditMode(true);
         inputControlsView.setOverlayOpacity(0.6f);
 
+        // ── 让编辑器和游玩时的坐标基准一致 ────────────────────────────────
+        //
+        // 游玩时 InputControlsView 会按「游戏画面区」归一化 x（屏幕比 16:9 宽时
+        // 画面居中，两侧留黑边）。如果编辑器不设同样的 viewportWidth，用户在编辑器里
+        // 拖着摆好的位置，一进游戏就会整体偏移 —— 这是最容易让人困惑的坑。
+        //
+        // 编辑器里拿不到具体容器的 screenSize（从主界面侧边栏进入，没有容器上下文），
+        // 所以用最常见的 16:9（1280x720）推算「画面区」。这与绝大多数容器一致；
+        // 若某容器用了别的比例，游玩时的偏差也只有黑边宽度那点量级。
+        //
+        // 另外叠一层「画面区边界」提示，让用户直观看到哪一段是游戏画面。
+        final int viewportWidth = InputControlsView.computeViewportWidth(this, "1280x720");
+        if (viewportWidth > 0) inputControlsView.setViewportWidth(viewportWidth);
+
         profile = InputControlsManager.loadProfile(this, ControlsProfile.getProfileFile(this, getIntent().getIntExtra("profile_id", 0)));
         ((TextView)findViewById(R.id.TVProfileName)).setText(profile.getName());
         inputControlsView.setProfile(profile);
 
-        FrameLayout container = findViewById(R.id.FLContainer);
-        container.addView(inputControlsView, 0);
+        FrameLayout frameLayout = findViewById(R.id.FLContainer);
+        frameLayout.addView(inputControlsView, 0);
 
-        container.findViewById(R.id.BTAddElement).setOnClickListener(this);
-        container.findViewById(R.id.BTRemoveElement).setOnClickListener(this);
-        container.findViewById(R.id.BTElementSettings).setOnClickListener(this);
+        frameLayout.findViewById(R.id.BTAddElement).setOnClickListener(this);
+        frameLayout.findViewById(R.id.BTRemoveElement).setOnClickListener(this);
+        frameLayout.findViewById(R.id.BTElementSettings).setOnClickListener(this);
 
-        toolbox = container.findViewById(R.id.Toolbox);
+        toolbox = frameLayout.findViewById(R.id.Toolbox);
 
         final PointF startPoint = new PointF();
         final boolean[] isActionDown = {false};
-        container.findViewById(R.id.BTMove).setOnTouchListener((v, event) -> {
+        frameLayout.findViewById(R.id.BTMove).setOnTouchListener((v, event) -> {
             switch (event.getAction()) {
                 case MotionEvent.ACTION_DOWN:
                     startPoint.x = event.getX();

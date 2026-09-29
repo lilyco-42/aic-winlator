@@ -501,7 +501,17 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
         boolean enableWineDebug = preferences.getBoolean("enable_wine_debug", false);
         String wineDebugChannels = preferences.getString("wine_debug_channels", SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS);
-        envVars.put("WINEDEBUG", enableWineDebug && !wineDebugChannels.isEmpty() ? "+"+wineDebugChannels.replace(",", ",+") : "-all");
+        if (enableWineDebug && !wineDebugChannels.isEmpty()) {
+            // 只要用户开了 wine debug，就额外带上音频链路（排查「没声音」靠这几条通道）
+            java.util.LinkedHashSet<String> channels = new java.util.LinkedHashSet<>();
+            for (String c : wineDebugChannels.split(",")) {
+                c = c.trim();
+                if (!c.isEmpty()) channels.add(c);
+            }
+            channels.addAll(java.util.Arrays.asList("alsa", "mmdevapi", "avrt", "dsound", "winmm", "msacm", "winealsa"));
+            envVars.put("WINEDEBUG", "+"+String.join(",+", channels));
+        }
+        else envVars.put("WINEDEBUG", "-all");
 
         FileUtils.clear(rootFS.getTmpDir());
 
@@ -612,48 +622,21 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         inputControlsView.setVisibility(View.GONE);
         // ── 告诉控件视图「游戏画面实际占多宽」 ──────────────────────────────
         //
-        // 游戏画面按 container.screenSize(如 1280x720) 等比缩放后**居中**显示。
-        // 屏幕比 16:9 更宽时（实测一加 15 横屏 2376x1080 = 2.2:1）画面只占中间
-        // 大约 1920px，左右各有约 228px 黑边。
-        //
         // 触屏控件的 x 是 0~1 归一化值，若乘「全屏宽」，贴右边设计的按键
         // （x≈0.95）会被推到物理边缘甚至落进黑边，拇指够不到。
-        // 这里按画面的实际宽度算，让控件始终落在画面内。
+        // 按画面的实际宽度算，让控件始终落在画面内。
         //
-        // 计算方式：屏幕高是画面的高（宽屏时纵向填满），所以
-        //     画面宽 = 屏幕高 × (容器宽/容器高)
-        // 再夹到屏幕宽以内（防竖屏或容器比屏幕更宽时越界）。
+        // ⚠ 与 ControlsEditorActivity 共用同一个静态方法 —— 编辑器里拖出来的
+        //   位置必须和游玩时一致，否则用户摆好了进游戏就错位。
         {
-            final int screenW = getResources().getDisplayMetrics().widthPixels;
-            final int screenH = getResources().getDisplayMetrics().heightPixels;
             final String screenSize = container != null ? container.getScreenSize() : null;
-            float viewportWidth = 0f;
-            if (screenSize != null) {
-                String[] parts = screenSize.split("x");
-                if (parts.length == 2) {
-                    try {
-                        final float gameW = Float.parseFloat(parts[0].trim());
-                        final float gameH = Float.parseFloat(parts[1].trim());
-                        if (gameW > 0 && gameH > 0) {
-                            final float aspect = gameW / gameH;
-                            final int longSide = Math.max(screenW, screenH);
-                            final int shortSide = Math.min(screenW, screenH);
-                            // 横屏：画面宽 = 短边(高) × 宽高比；竖屏：画面宽 = 短边(宽)
-                            viewportWidth = longSide > shortSide ? shortSide * aspect : shortSide;
-                            viewportWidth = Math.min(viewportWidth, longSide);
-                        }
-                    }
-                    catch (NumberFormatException ignored) { }
-                }
-            }
-            if (viewportWidth > 0) inputControlsView.setViewportWidth((int)viewportWidth);
+            final int viewportWidth = InputControlsView.computeViewportWidth(this, screenSize);
+            if (viewportWidth > 0) inputControlsView.setViewportWidth(viewportWidth);
             // 诊断用：在设备上直接看这几个数对不对（logcat -s AICViewport）
-            android.util.Log.i("AICViewport", "screen=" + screenW + "x" + screenH
+            android.util.Log.i("AICViewport", "screen=" + getResources().getDisplayMetrics().widthPixels
+                    + "x" + getResources().getDisplayMetrics().heightPixels
                     + " screenSize=" + screenSize
-                    + " viewportWidth=" + (int)viewportWidth
-                    + " viewWidth=" + inputControlsView.getMaxWidth()
-                    + " viewHeight=" + inputControlsView.getMaxHeight()
-                    + " dmAspect=" + ((float) Math.max(screenW, screenH) / Math.min(screenW, screenH)));
+                    + " viewportWidth=" + viewportWidth);
         }
         rootView.addView(inputControlsView);
 

@@ -71,7 +71,15 @@ public abstract class ProcessHelper {
         int pid = -1;
         try {
             ProcessBuilder processBuilder = (new ProcessBuilder(splitCommand(command))).directory(workingDir);
-            if (debugCallbacks.isEmpty()) processBuilder.redirectOutput(new File("/dev/null")).redirectErrorStream(true);
+            if (debugCallbacks.isEmpty()) {
+                File guestLog = GuestLog.getLogFile(workingDir);
+                if (guestLog != null) {
+                    processBuilder.redirectOutput(ProcessBuilder.Redirect.appendTo(guestLog)).redirectErrorStream(true);
+                }
+                else {
+                    processBuilder.redirectOutput(new File("/dev/null")).redirectErrorStream(true);
+                }
+            }
 
             Map<String, String> environment = processBuilder.environment();
             for (String name : envVars) environment.put(name, envVars.get(name));
