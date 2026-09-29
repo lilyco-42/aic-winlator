@@ -55,8 +55,30 @@ public final class AicSetup {
     public static final String GAME_FOLDER = "AliceInCradle";
     public static final String GAME_EXE = "AliceInCradle.exe";
 
-    /** 内置触屏布局 id —— 对应 assets/inputcontrols/profiles/controls-5.icp。 */
+    /**
+     * 默认触屏布局 id —— 对应 assets/inputcontrols/profiles/controls-5.icp（纯手柄映射）。
+     *
+     * <p>为什么用手柄而不是键盘：AIC 的输入层是 Unity Input System 1.14.2，游戏存档目录里的
+     * {@code config.cfg} 存着一张**每个动作同时绑键盘和手柄**的表，手柄侧覆盖完整
+     * （{@code buttonSouth/East/North/West}、{@code leftStick}、肩键/扳机、
+     * {@code rightStick} 选魔法方向、震动）。用摇杆做移动比八向 D_PAD 精度高得多，
+     * 而且天然绕开键盘的键位布局映射问题。
+     *
+     * <p>Winlator 侧也齐：{@code Binding} 枚举里 {@code GAMEPAD_BUTTON_A..R2} 连续排列，
+     * ordinal 差正好 0..11，与 {@code ExternalController.IDX_BUTTON_*} 对齐；
+     * {@code ControlsProfile.load()} 发现元素全是手柄绑定时会自动把 {@code virtualGamepad}
+     * 置 true，不需要额外开关。
+     */
     public static final String CONTROLS_PROFILE_ID = "5";
+
+    /**
+     * 键盘布局 id —— controls-6.icp，作为手柄路线失效时的兜底。
+     *
+     * <p>什么时候会用到：Wine 的 {@code windows.gaming.input} 实现不完整时，
+     * 虚拟手柄事件可能送不进去。此时把容器 / 快捷方式的 {@code controlsProfile}
+     * 改成这个 id 即可切回纯键盘映射（键位同样按 config.cfg 的权威表来）。
+     */
+    public static final String CONTROLS_PROFILE_ID_KEYBOARD = "6";
 
     /** 上一次真正拉起游戏的时间戳（毫秒），用来做冷却防抖。 */
     private static final String PREF_LAST_LAUNCH = "aic_last_launch_time";
